@@ -14,9 +14,9 @@ SERVICES=(
 )
 
 for entry in "${SERVICES[@]}"; do
-    name "${entry%%:*}"
-    port "${entry##*:}"
-    module "spring-petclinic-$name"
+    name="${entry%%:*}"
+    port="${entry##*:}"
+    module="spring-petclinic-$name"
     jar="$(ls target/$module-*.jar | head -n 1)"
     artifact="$(basename "$jar" .jar)"
     image="$REGISTRY/$artifact:$TAG"
