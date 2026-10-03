@@ -1,0 +1,64 @@
+{{- range $name, $svc := .Values.services }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    app: {{ $name }}
+spec:
+  replicas: {{ $.Values.replicas }}
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+    spec:
+      {{- if $svc.waitFor }}
+      initContainers:
+        {{- range $svc.waitFor }}
+        - name: wait-for-{{ .host }}
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - until wget -q -T 5 -O /dev/null http://{{ .host }}:{{ .port }}{{ $.Values.healthPath }}; do echo "waiting for {{ .host }}"; sleep 3; done
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: {{ $name }}
+          image: "{{ $.Values.image.registry }}/spring-petclinic-{{ $name }}:{{ $.Values.image.tag }}"
+          ports:
+            - containerPort: {{ $svc.port }}
+          env:
+            - name: EUREKA_INSTANCE_PREFER_IP_ADDRESS
+              value: "true"
+            {{- range $key, $value := $svc.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: {{ $.Values.healthPath }}
+              port: {{ $svc.port }}
+            periodSeconds: 5
+            timeoutSeconds: {{ $.Values.probeTimeoutSeconds }}
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: {{ $.Values.healthPath }}
+              port: {{ $svc.port }}
+            periodSeconds: 10
+            timeoutSeconds: {{ $.Values.probeTimeoutSeconds }}
+          livenessProbe:
+            httpGet:
+              path: {{ $.Values.healthPath }}
+              port: {{ $svc.port }}
+            periodSeconds: 20
+            timeoutSeconds: {{ $.Values.probeTimeoutSeconds }}
+            failureThreshold: 6
+          resources:
+            {{- toYaml $.Values.resources | nindent 12 }}
+{{- end }}
