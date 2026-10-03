@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REGISTRY="kitofoso"
-TAG="$(git rev-parse --short HEAD)"
+TAG="${IMAGE_TAG:-$(git rev-parse --short HEAD)}"
 
 # Mỗi phần tử có dạng tên-service:cổng
 SERVICES=(

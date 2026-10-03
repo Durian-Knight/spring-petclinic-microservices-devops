@@ -1,0 +1,109 @@
+pipeline {
+    agent any
+
+    environment {
+        REGISTRY   = "kitofoso"
+        SERVICES   = "config-server discovery-server customers-service visits-service vets-service api-gateway"
+        HELM_CHART = "helm/petclinic"
+        NAMESPACE  = "petclinic"
+        KUBECONFIG = "/var/jenkins_home/.kube/config-petclinic-ms"
+    }
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.IMAGE_TAG = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                }
+                echo "Image tag: ${env.IMAGE_TAG}"
+            }
+        }
+
+        stage('Build & Unit Test') {
+            steps {
+                sh './mvnw -B -ntp clean test'
+            }
+            post {
+                always {
+                    junit testResults: '**/target/surefire-reports/*.xml', allowEmptyResults: true
+                }
+            }
+        }
+
+        stage('Package') {
+            steps {
+                sh './mvnw -B -ntp -DskipTests package'
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                sh './scripts/build-images.sh'
+            }
+        }
+
+        stage('Security Scan (Trivy)') {
+            steps {
+                sh '''
+                  for s in $SERVICES; do
+                    echo "==> Scanning $s"
+                    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                      -v trivy-cache:/root/.cache/ \
+                      aquasec/trivy:latest image --exit-code 0 --severity HIGH,CRITICAL --timeout 15m --quiet \
+                      $REGISTRY/spring-petclinic-$s:$IMAGE_TAG
+                  done
+                '''
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKERHUB_USER', passwordVariable: 'DOCKERHUB_TOKEN')]) {
+                    sh '''
+                      echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USER" --password-stdin
+                      for s in $SERVICES; do
+                        docker push $REGISTRY/spring-petclinic-$s:$IMAGE_TAG
+                      done
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh '''
+                  helm upgrade --install petclinic $HELM_CHART \
+                    -n $NAMESPACE --create-namespace \
+                    --set-string image.tag=$IMAGE_TAG \
+                    --atomic --timeout 10m
+                '''
+            }
+        }
+
+        stage('Smoke Test') {
+            steps {
+                sh '''
+                  kubectl run smoke-$BUILD_NUMBER --rm -i --restart=Never -n $NAMESPACE \
+                    --image=curlimages/curl:8.10.1 --command -- \
+                    curl -sf --retry 10 --retry-delay 6 --retry-all-errors -o /dev/null \
+                    http://api-gateway:8080/api/vet/vets
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker logout || true'
+        }
+        success {
+            echo "Deployed tag ${env.IMAGE_TAG} to namespace ${env.NAMESPACE}"
+        }
+    }
+}
