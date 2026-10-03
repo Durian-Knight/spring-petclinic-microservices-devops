@@ -6,10 +6,14 @@ metadata:
   name: {{ $name }}
   labels:
     app: {{ $name }}
+    {{- if $svc.metrics }}
+    metrics: "true"
+    {{- end }}
 spec:
   selector:
     app: {{ $name }}
   ports:
-    - port: {{ $svc.port }}
+    - name: http
+      port: {{ $svc.port }}
       targetPort: {{ $svc.port }}
 {{- end }}
