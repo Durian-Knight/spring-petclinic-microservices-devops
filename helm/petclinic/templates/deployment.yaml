@@ -35,6 +35,10 @@ spec:
           env:
             - name: EUREKA_INSTANCE_PREFER_IP_ADDRESS
               value: "true"
+            {{- if $svc.metrics }}
+            - name: MANAGEMENT_METRICS_DISTRIBUTION_PERCENTILESHISTOGRAM_HTTP_SERVER_REQUESTS
+              value: "true"
+            {{- end }}
             {{- range $key, $value := $svc.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}
